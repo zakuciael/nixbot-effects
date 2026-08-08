@@ -1,13 +1,20 @@
-{ pkgs }:
+{
+  runCommand,
+  stdenvNoCC,
+  writers,
+  cacert,
+  curl,
+  jq,
+}:
 let
   # Fetches a workload-identity ID token from nixbot inside the effect
   # sandbox, see docs/WORKLOAD_IDENTITY.md. --json prints the raw
   # {token, expires_at} response (niks3's ScriptToken format).
-  idTokenScript = pkgs.writers.writePython3Bin "nixbot-id-token" { } (
+  idTokenScript = writers.writePython3Bin "nixbot-id-token" { } (
     builtins.readFile ./scripts/nixbot-id-token.py
   );
 
-  effectSetupHook = pkgs.runCommand "effects-setup-hook-sh" { } ''
+  effectSetupHook = runCommand "effects-setup-hook-sh" { } ''
     mkdir -p $out/nix-support
     cp ${./scripts/effects-setup-hook.sh} $out/nix-support/setup-hook
   '';
@@ -33,7 +40,7 @@ in
   lock ? null,
   ...
 }@attrs:
-pkgs.stdenvNoCC.mkDerivation (
+stdenvNoCC.mkDerivation (
   {
     inherit name effectScript userSetupScript;
     # Attr paths are nested lists, which cannot be coerced into
@@ -45,9 +52,9 @@ pkgs.stdenvNoCC.mkDerivation (
     idTokenAudiences = builtins.toJSON idTokenAudiences;
 
     nativeBuildInputs = [
-      pkgs.cacert
-      pkgs.curl
-      pkgs.jq
+      cacert
+      curl
+      jq
       effectSetupHook
     ]
     ++ (if idTokenAudiences != [ ] then [ idTokenScript ] else [ ])
