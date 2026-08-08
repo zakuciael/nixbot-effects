@@ -1,3 +1,7 @@
+registerPutStatePhaseOnFailure() {
+  failureHooks=("putStatePhaseOnFailure" "${failureHooks[@]}")
+}
+
 getStateFile() {
   local stateName="$1"
   local stateFileName="${2:-$1}"

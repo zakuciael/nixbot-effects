@@ -23,6 +23,8 @@ in
 {
   effectScript ? "",
   userSetupScript ? "",
+  getStateScript ? "",
+  putStateScript ? "",
   name ? "effect",
   inputs ? [ ],
   secretsMap ? { },
@@ -42,7 +44,13 @@ in
 }@attrs:
 stdenvNoCC.mkDerivation (
   {
-    inherit name effectScript userSetupScript;
+    inherit
+      name
+      effectScript
+      userSetupScript
+      getStateScript
+      putStateScript
+      ;
     # Attr paths are nested lists, which cannot be coerced into
     # derivation env vars; expose them via passthru instead.
     passthru = { inherit after lock; };
@@ -62,12 +70,33 @@ stdenvNoCC.mkDerivation (
 
     phases = [
       "initPhase"
+      "getStatePhase"
       "userSetupPhase"
       "effectPhase"
+      "putStatePhase"
     ];
 
     userSetupPhase = ''eval "$userSetupScript"'';
     effectPhase = ''eval "$effectScript"'';
+
+    getStatePhase = ''
+      runHook preGetState
+      eval "$getStateScript"
+      runHook postGetState
+      registerPutStatePhaseOnFailure
+    '';
+
+    putStatePhase = ''
+      if [[ -z ''${PUT_STATE_DONE:-} ]]; then
+        runHook prePutState
+        eval "$putStateScript"
+        runHook postPutState
+        PUT_STATE_DONE=true
+      else
+        echo 1>&2 "NOTE: State has already been uploaded and was not uploaded again."
+      fi
+    '';
+
     initPhase = ''
       exec </dev/null
       export HOME=/build/home
