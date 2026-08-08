@@ -12,10 +12,19 @@
   outputs =
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      debug = true;
+
+      imports = [
+        ./flake-module/default.nix
+        ./test.nix
+      ];
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
       ];
+
+      flake.flakeModule = ./flake-module.nix;
     };
 }
