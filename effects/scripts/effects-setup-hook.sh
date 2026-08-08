@@ -137,3 +137,11 @@ writeGPGKey() {
   readSecretString "$secretName" .privateKey | gpg --import
   readSecretString "$secretName" .privateKey | gpgTrust
 }
+
+writeAgeKey() {
+  local secretName="${1:-age}"
+  local fileName="${2:-$HOME/.config/sops/age/keys.txt}"
+
+  mkdir -p "$(dirname "$fileName")"
+  readSecretString "$secretName" .privateKey >"$fileName"
+}
