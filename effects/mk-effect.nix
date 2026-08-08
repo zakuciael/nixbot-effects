@@ -76,8 +76,17 @@ stdenvNoCC.mkDerivation (
       "putStatePhase"
     ];
 
-    userSetupPhase = ''eval "$userSetupScript"'';
-    effectPhase = ''eval "$effectScript"'';
+    userSetupPhase = ''
+      runHook preUserSetup
+      eval "$userSetupScript"
+      runHook postUserSetup
+    '';
+
+    effectPhase = ''
+      runHook preEffect
+      eval "$effectScript"
+      runHook postEffect
+    '';
 
     getStatePhase = ''
       runHook preGetState
