@@ -24,6 +24,8 @@ in
         {
           _file = ./flake-module.nix;
           options = {
+            repo = (import ./types/repo.nix { inherit lib; }).option;
+
             jobs = mkOption {
               type = types.lazyAttrsOf (
                 types.submodule {
@@ -68,16 +70,22 @@ in
         (lib.evalModules {
           modules = [
             {
-              _module.args.repo = {
-                inherit (primaryRepo) ref rev shortRev;
-                branch = primaryRepo.branch or null;
-                tag = primaryRepo.tag or null;
-                remoteHttpUrl = primaryRepo.remoteHttpUrl or null;
-                remoteSshUrl = primaryRepo.remoteSshUrl or null;
-                webUrl = primaryRepo.webUrl or null;
-                forgeType = primaryRepo.forgeType or null;
-                owner = primaryRepo.owner or null;
-                name = primaryRepo.name or null;
+              _file = "herculesCI parameters";
+              config = {
+                # Filter out values which are unavailable and therefore null.
+                repo = {
+                  inherit (primaryRepo) ref rev shortRev;
+                  branch = primaryRepo.branch or null;
+                  tag = primaryRepo.tag or null;
+                }
+                // lib.filterAttrs (k: v: v != null) {
+                  remoteHttpUrl = primaryRepo.remoteHttpUrl or null;
+                  remoteSshUrl = primaryRepo.remoteSshUrl or null;
+                  webUrl = primaryRepo.webUrl or null;
+                  forgeType = primaryRepo.forgeType or null;
+                  owner = primaryRepo.owner or null;
+                  name = primaryRepo.name or null;
+                };
               };
             }
           ]
