@@ -23,7 +23,23 @@ in
         { system, ... }:
         {
           _file = ./flake-module.nix;
-          freeformType = types.lazyAttrsOf types.package;
+          options = {
+            jobs = mkOption {
+              type = types.lazyAttrsOf (
+                types.submodule {
+                  options = {
+                    steps = mkOption {
+                      type = types.lazyAttrsOf types.package;
+                    };
+                    on = {
+                      push = (import ./types/on-push.nix { inherit lib; }).option;
+                      schedule = (import ./types/on-schedule.nix { inherit lib; }).option;
+                    };
+                  };
+                }
+              );
+            };
+          };
 
           config = {
             _module.args = {
@@ -71,7 +87,7 @@ in
             system = config.defaultEffectSystem;
           };
           class = "hci-effects";
-        }).config;
+        }).config.jobs;
     };
   };
 }
