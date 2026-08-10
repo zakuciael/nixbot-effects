@@ -1,5 +1,5 @@
 {
-  description = "A minimal subset of hercules-ci-effects sufficient for nixbot-effects.";
+  description = "A flake-parts module for declaring NixBot effects similarly to the GitHub Actions Workflow syntax";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
