@@ -13,13 +13,6 @@
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } (
       { self, ... }: {
-        debug = true;
-
-        imports = [
-          ./flake-module/default.nix
-          ./test.nix
-        ];
-
         systems = [
           "x86_64-linux"
           "aarch64-linux"
