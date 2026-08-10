@@ -11,20 +11,25 @@
 
   outputs =
     inputs@{ flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
-      debug = true;
+    flake-parts.lib.mkFlake { inherit inputs; } (
+      { self, ... }: {
+        debug = true;
 
-      imports = [
-        ./flake-module/default.nix
-        ./test.nix
-      ];
+        imports = [
+          ./flake-module/default.nix
+          ./test.nix
+        ];
 
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
+        systems = [
+          "x86_64-linux"
+          "aarch64-linux"
+          "aarch64-darwin"
+        ];
 
-      flake.flakeModule = ./flake-module.nix;
-    };
+        flake = {
+          flakeModule = self.flakeModules.default;
+          flakeModules.default = ./flake-module/default.nix;
+        };
+      }
+    );
 }
