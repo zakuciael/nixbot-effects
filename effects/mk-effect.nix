@@ -41,9 +41,10 @@ in
   after ? [ ],
   lock ? null,
   ...
-}@attrs:
+}@args:
 stdenvNoCC.mkDerivation (
-  {
+  args
+  // {
     inherit
       name
       effectScript
@@ -112,5 +113,4 @@ stdenvNoCC.mkDerivation (
       mkdir -p "$HOME"
     '';
   }
-  // attrs
 )
