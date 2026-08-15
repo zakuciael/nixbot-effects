@@ -3,6 +3,7 @@
   config,
   lib,
   flake-parts-lib,
+  getSystem,
   ...
 }:
 let
@@ -60,6 +61,8 @@ in
               self' = builtins.addErrorContext "while retrieving system-dependent attributes for a flake's own outputs" (
                 rootConfig.perInput system self
               );
+
+              systemConfig = getSystem system;
             };
           };
         }
