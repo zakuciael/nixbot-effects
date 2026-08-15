@@ -135,6 +135,52 @@ The effect derivation runs these phases:
 
 Each phase supports `pre`/`post` hooks (e.g. `preEffect`, `postEffect`), and state files can be downloaded/uploaded from within a script using the `getStateFile` / `putStateFile` bash functions.
 
+### Bundled effects
+
+The module argument also ships a few ready-made effects built on `mkEffect`:
+
+### `hci-effects.runClan`
+
+Runs `clan machines update` against your Clan machines.
+
+| Argument      | Type     | Description                                                                          |
+| ------------- | -------- | ------------------------------------------------------------------------------------ |
+| `machines`    | `list`   | Machine names from the Clan inventory to update, passed as positional args.          |
+| `tags`        | `list`   | Only update machines carrying these tags, passed as `--tags`.                         |
+| `debug`       | `bool`   | Pass `--debug` to `clan machines update`.                                            |
+| `extraArgs`   | `string` | Extra CLI arguments appended to the command.                                         |
+| `inputs`      | `list`   | Extra packages to add to `nativeBuildInputs`.                                        |
+| `secretsMap`  | `attrs`  | Secret mapping; defaults to `{ ssh = "clan-ssh"; age = "clan-age"; }`.               |
+
+It requests a pushable checkout and wires up state/secrets for you: the age key is written for decrypting clan secrets, the SSH key for connecting to the machines, and `clan.known_hosts` is downloaded/uploaded via `getStateFile`/`putStateFile`. `--host-key-check accept-new` is always passed.
+
+### `hci-effects.runTerraform`
+
+Runs a Terraform/OpenTofu CLI command (e.g. `plan` or `apply`) against the checkout. By default `init` is run first (in the `userSetup` phase), so init failures abort the effect before the requested command executes.
+
+| Argument     | Type     | Description                                                                 |
+| ------------ | -------- | --------------------------------------------------------------------------- |
+| `package`    | `package`| The CLI binary to use for init and the command (OpenTofu, Terraform, or any CLI-compatible package), defaults to `opentofu`. |
+| `command`    | `string` | Any command accepted by the Terraform CLI (e.g. `"plan"`, `"apply"`, `"state"`, `"output"`), defaults to `"plan"`. |
+| `extraArgs`  | `string` | Extra CLI arguments appended to the command.                                |
+| `initBeforeRun` | `bool` | Run `init` before the command, defaults to `true`. Set to `false` when `init` output is generated at build time (e.g. by the [terranix](https://terranix.org/) flake-parts module) to avoid running `init` multiple times. |
+
+It requests a pushable checkout. Since arbitrary derivations cover the `plan`/`apply` split, use `after` to order effects that apply after a plan passes review.
+
+```nix
+hci-effects.jobs.deploy.steps = {
+  plan = hci-effects.runTerraform {
+    # `opentofu init` runs automatically before this.
+    extraArgs = "-lock-timeout=5m";
+  };
+  apply = hci-effects.runTerraform {
+    after = [ [ "deploy" "plan" ] ];
+    command = "apply";
+    extraArgs = "-auto-approve";
+  };
+};
+```
+
 ### `hci-effects.jobs.<job-id>.steps.<name>`
 
 A step is any Nix package (an effect derivation). You normally create it with `hci-effects.mkEffect`.
