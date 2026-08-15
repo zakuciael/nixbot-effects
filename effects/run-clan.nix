@@ -20,6 +20,7 @@ in
     "ssh" = "clan-ssh";
     "age" = "clan-age";
   },
+  ...
 }@args:
 (
   mkEffect args

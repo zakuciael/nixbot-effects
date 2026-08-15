@@ -8,6 +8,7 @@
   command ? "plan",
   extraArgs ? "",
   initBeforeRun ? true,
+  ...
 }@args:
 let
   inherit (lib) optionalString getExe;
