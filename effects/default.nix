@@ -11,4 +11,8 @@ in
     inherit mkEffect;
     inherit (inputs'.clan-core.packages) clan-cli;
   };
+
+  runTerraform = callPackage ./run-terraform.nix {
+    inherit mkEffect;
+  };
 }
