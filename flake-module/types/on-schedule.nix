@@ -15,6 +15,7 @@ let
       See the `on.schedule.*` options below for details.
     '';
     inherit type;
+    default = null;
   };
 
   type = types.nullOr (types.submodule module);
