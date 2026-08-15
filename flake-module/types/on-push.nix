@@ -12,6 +12,7 @@ let
         runs.
     '';
     inherit type;
+    default = null;
   };
 
   type = types.nullOr types.bool;
