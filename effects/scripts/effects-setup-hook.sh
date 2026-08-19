@@ -149,3 +149,37 @@ writeAgeKey() {
   mkdir -p "$(dirname "$fileName")"
   readSecretString "$secretName" .privateKey >"$fileName"
 }
+
+setupGit() {
+  local commitAuthor="${1:-}"
+  local commitEmail="${2:-}"
+
+  if [ -z "$commitAuthor" ]; then
+    echo "You need to specify the commitAuthor variable"
+    return 1
+  fi
+
+  jsonData=$(
+    curl \
+      --retry-max-time 86400 --retry-connrefused --max-time 1800 \
+      --silent --show-error \
+      --globoff \
+      --location \
+      "https://api.github.com/users/$commitAuthor"
+  )
+  read -r name id type < <(echo "$jsonData" | jq -r '[ .login, .id, .type ] | join(" ")')
+
+  if [ "$type" != "Bot" ] && [ -z "$commitEmail" ]; then
+    echo "If your are using a non-bot account you need to specify commitEmail variable"
+    return 1
+  fi
+
+  if [ "$type" == "Bot" ]; then
+    commitAuthor="${name}"
+    commitEmail="${id}+${name}@users.noreply.github.com"
+  fi
+
+  git config --global user.name "$commitAuthor"
+  git config --global user.email "$commitEmail"
+  git config --global safe.directory '*'
+}
