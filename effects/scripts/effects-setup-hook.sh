@@ -1,3 +1,10 @@
+putStatePhaseOnFailure() {
+  if [[ -n $putStatePhase ]]; then
+    echo 'uploading state files after failure' 1>&2
+    eval "$putStatePhase"
+  fi
+}
+
 registerPutStatePhaseOnFailure() {
   failureHooks=("putStatePhaseOnFailure" "${failureHooks[@]}")
 }
