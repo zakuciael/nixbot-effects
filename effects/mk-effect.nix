@@ -111,6 +111,9 @@ stdenvNoCC.mkDerivation (
       exec </dev/null
       export HOME=/build/home
       mkdir -p "$HOME"
+      echo "root:x:$(id -u):$(id -g):root:$HOME:/bin/sh" >> /etc/passwd
+      mkdir -p ~/.ssh
+      echo "BatchMode yes" >> ~/.ssh/config
     '';
   }
 )
