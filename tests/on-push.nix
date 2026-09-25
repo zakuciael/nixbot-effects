@@ -9,6 +9,7 @@ let
     matchGlob
     matchIncludePatterns
     matchIgnorePatterns
+    matchRefFilters
     resolvePush
     checkPushFilters
     ;
@@ -305,5 +306,134 @@ in
       tags = null;
       tagsIgnore = null;
     };
+  };
+
+  testCheckBothTagsFilters = {
+    expr = (evalOk (
+      checkPushFilters {
+        branches = null;
+        branchesIgnore = null;
+        tags = [ "v*" ];
+        tagsIgnore = [ "v1.*" ];
+      }
+    )).success;
+    expected = false;
+  };
+
+  testCheckNegationOnTagsIgnore = {
+    expr = (evalOk (
+      checkPushFilters {
+        branches = null;
+        branchesIgnore = null;
+        tags = null;
+        tagsIgnore = [ "!v1.*" ];
+      }
+    )).success;
+    expected = false;
+  };
+
+  testCheckOnlyNegationTags = {
+    expr = (evalOk (
+      checkPushFilters {
+        branches = null;
+        branchesIgnore = null;
+        tags = [ "!v1.*" ];
+        tagsIgnore = null;
+      }
+    )).success;
+    expected = false;
+  };
+
+  # --- matchRefFilters ---
+
+  testMatchRefFiltersInclude = {
+    expr = {
+      hit = matchRefFilters "main" [ "main" "dev" ] null;
+      miss = matchRefFilters "other" [ "main" "dev" ] null;
+      ignoreHit = matchRefFilters "main" null [ "main" ];
+      ignoreMiss = matchRefFilters "dev" null [ "main" ];
+      neither = matchRefFilters "anything" null null;
+    };
+    expected = {
+      hit = true;
+      miss = false;
+      ignoreHit = false;
+      ignoreMiss = true;
+      neither = true;
+    };
+  };
+
+  # --- resolvePush mixed / tagsIgnore ---
+
+  testResolveTagsIgnore = {
+    expr = {
+      ignored = resolvePush repoTag {
+        branches = null;
+        branchesIgnore = null;
+        tags = null;
+        tagsIgnore = [ "v1.*" ];
+      };
+      allowed = resolvePush { branch = null; tag = "v2.0.0"; } {
+        branches = null;
+        branchesIgnore = null;
+        tags = null;
+        tagsIgnore = [ "v1.*" ];
+      };
+    };
+    expected = {
+      ignored = false;
+      allowed = true;
+    };
+  };
+
+  testResolveBothFamiliesOnBranch = {
+    # Branch filters + tag filters: branch push uses branch filters only.
+    expr = {
+      onMain = resolvePush repoBranch {
+        branches = [ "main" ];
+        branchesIgnore = null;
+        tags = [ "v*" ];
+        tagsIgnore = null;
+      };
+      onOther = resolvePush { branch = "dev"; tag = null; } {
+        branches = [ "main" ];
+        branchesIgnore = null;
+        tags = [ "v*" ];
+        tagsIgnore = null;
+      };
+      onTag = resolvePush repoTag {
+        branches = [ "main" ];
+        branchesIgnore = null;
+        tags = [ "v1.*" ];
+        tagsIgnore = null;
+      };
+    };
+    expected = {
+      onMain = true;
+      onOther = false;
+      onTag = true;
+    };
+  };
+
+  testResolveBranchFiltersRejectTag = {
+    # Only branch filters → tag pushes do not run.
+    expr = resolvePush repoTag {
+      branches = [ "main" ];
+      branchesIgnore = null;
+      tags = null;
+      tagsIgnore = null;
+    };
+    expected = false;
+  };
+
+  testResolveTagFiltersRejectBranch = {
+    # Only tag filters → branch pushes do not run.
+    expr = resolvePush repoBranch {
+      branches = null;
+      branchesIgnore = null;
+      tags = [ "v*" ];
+      tagsIgnore = null;
+    };
+    expected = false;
   };
 }
