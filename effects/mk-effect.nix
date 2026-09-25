@@ -43,8 +43,7 @@ in
   ...
 }@args:
 stdenvNoCC.mkDerivation (
-  args
-  // {
+  {
     inherit
       name
       effectScript
@@ -116,4 +115,5 @@ stdenvNoCC.mkDerivation (
       echo "BatchMode yes" >> ~/.ssh/config
     '';
   }
+  // args
 )
