@@ -3,9 +3,21 @@
   lib,
   ...
 }:
+let
+  runIf =
+    condition: effect:
+    if condition then
+      { run = effect; }
+    else
+      {
+        dependencies = effect.inputDerivation // {
+          isEffect = false;
+          buildDependenciesOnly = true;
+        };
+      };
+in
 {
   config = {
-
     flake.herculesCI =
       {
         primaryRepo ? throw "`<flake>.outputs.herculesCI` requires a `primaryRepo` argument.",
@@ -16,18 +28,7 @@
       in
       {
         onPush = lib.mapAttrs (_: job: {
-          outputs.effects = lib.mapAttrs (
-            _: step:
-            if job.on.push then
-              { run = step; }
-            else
-              {
-                dependencies = step.inputDerivation // {
-                  isEffect = false;
-                  buildDependenciesOnly = true;
-                };
-              }
-          ) job.steps;
+          outputs.effects = lib.mapAttrs (_: effect: runIf job.on.push effect) job.steps;
         }) (lib.filterAttrs (_: job: job.on.push != null) jobs);
 
         onSchedule = lib.mapAttrs (_: job: {
