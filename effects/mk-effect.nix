@@ -51,7 +51,10 @@ in
   # serializing runs across builds.
   after ? [ ],
   lock ? null,
-  ...
+  # onEvent only: conditions nixbot checks against the event before
+  # running, see https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md. `lock` may contain `{pr}` there.
+  when ? { },
+  # ...
 }@args:
 stdenvNoCC.mkDerivation (
   {
@@ -64,8 +67,9 @@ stdenvNoCC.mkDerivation (
       ;
     # Attr paths are nested lists, which cannot be coerced into
     # derivation env vars; expose them via passthru instead.
-    passthru = { inherit after lock; };
+    passthru = { inherit after lock when; };
     isEffect = true;
+
     __nixbot_effect_checkout = checkout;
     # like upstream hercules-ci-effects
     __hci_effect_fsroot_copy = runCommand "mkEffect-root" { } ''
