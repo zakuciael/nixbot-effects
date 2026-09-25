@@ -5,8 +5,13 @@
   cacert,
   curl,
   jq,
+  bash,
+  coreutils,
+  lib,
 }:
 let
+  inherit (lib) getExe;
+
   # Fetches a workload-identity ID token from nixbot inside the effect
   # sandbox, see docs/WORKLOAD_IDENTITY.md. --json prints the raw
   # {token, expires_at} response (niks3's ScriptToken format).
@@ -56,6 +61,13 @@ stdenvNoCC.mkDerivation (
     passthru = { inherit after lock; };
     isEffect = true;
     __nixbot_effect_checkout = checkout;
+    # like upstream hercules-ci-effects
+    __hci_effect_fsroot_copy = runCommand "mkEffect-root" { } ''
+      mkdir -p $out/bin $out/usr/bin
+      ln -s ${getExe bash} $out/bin/sh
+      ln -s ${coreutils}/bin/env $out/usr/bin/env
+    '';
+
     secretsMap = builtins.toJSON secretsMap;
     idTokenAudiences = builtins.toJSON idTokenAudiences;
 
