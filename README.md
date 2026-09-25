@@ -46,8 +46,14 @@ A job is a set of _steps_ plus the events that trigger it. Each step is an effec
 {
   hci-effects.jobs = {
     deploy = {
-      # Run on every push.
-      on.push = true;
+      # Run on pushes to main or release branches (not alpha).
+      on.push = {
+        branches = [
+          "main"
+          "releases/**"
+          "!releases/**-alpha"
+        ];
+      };
 
       steps = {
         # Build and push the container image.
@@ -189,12 +195,46 @@ A step is any Nix package (an effect derivation). You normally create it with `h
 
 A job may set `push`, `schedule`, or both at once; jobs with neither are ignored.
 
-- `push` — `null` (default; job not declared for push), `true`, or `false`. A boolean value both declares the job for push events _and_ acts as the condition for whether it runs.
-- `schedule` — `null` (default) or an attribute set with:
-  - `minute` — `null` or integer `0..59` (arbitrary when `null`)
-  - `hour` — `null` or int / list of ints `0..23`
-  - `dayOfWeek` — `null` or list of `"Mon"`..`"Sun"`
-  - `dayOfMonth` — `null` or list of ints `0..31`
+#### `on.push`
+
+`null` (default; job not declared for push), a boolean, or a filter attribute set. Booleans both declare the job for push events and act as the `runIf` condition. An empty set `{ }` is the same as `true`.
+
+You can still write a manual condition:
+
+```nix
+on.push = config.repo.branch == "main";
+```
+
+Or use GitHub Actions-style filters (matched against `config.repo.branch` / `config.repo.tag`):
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `branches` | string or list of strings | Include branch name patterns. Use ordered `!` entries to exclude after including. Cannot be set with `branchesIgnore`. |
+| `branchesIgnore` | string or list of strings | Exclude-only branch patterns. Cannot be set with `branches`. No `!` prefixes. |
+| `tags` | string or list of strings | Include tag name patterns (same `!` rules as `branches`). Cannot be set with `tagsIgnore`. |
+| `tagsIgnore` | string or list of strings | Exclude-only tag patterns. Cannot be set with `tags`. No `!` prefixes. |
+
+Semantics match [GitHub Actions `on.push` filters](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore):
+
+- Only branch filters set → tag pushes do not run (and the other way around).
+- Neither filter family set → both branches and tags run.
+- Patterns use the Actions filter syntax: `*`, `**`, `?`, `+`, `[]`, `\`, and leading `!` on include lists.
+
+```nix
+on.push = {
+  branches = [ "main" "releases/**" "!releases/**-alpha" ];
+  tags = [ "v*" ];
+};
+```
+
+#### `on.schedule`
+
+`null` (default) or an attribute set with:
+
+- `minute` — `null` or integer `0..59` (arbitrary when `null`)
+- `hour` — `null` or int / list of ints `0..23`
+- `dayOfWeek` — `null` or list of `"Mon"`..`"Sun"`
+- `dayOfMonth` — `null` or list of ints `0..31`
 
 All values are equality constraints evaluated in **UTC**. If `minute` or `hour` is omitted, an arbitrary time is picked. See the [hercules-ci-effects schedule reference](https://docs.hercules-ci.com/hercules-ci-effects/) for details.
 
