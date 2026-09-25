@@ -21,13 +21,13 @@ let
 in
 
 {
-  effectScript ? "",
+  name,
+  effectScript,
   userSetupScript ? "",
-  getStateScript ? "",
-  putStateScript ? "",
-  name ? "effect",
   inputs ? [ ],
   secretsMap ? { },
+  getStateScript ? "",
+  putStateScript ? "",
   # Pushable repository checkout at /build/checkout ($NIXBOT_EFFECT_CHECKOUT),
   # see https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md
   checkout ? false,
