@@ -4,22 +4,36 @@ let
   inherit (import ../flake-module/hercules-ci-lib.nix { inherit lib; })
     runIf
     mkOutputs
+    normalizeAfter
     ;
 
   # Stand-in for an effect derivation; only `inputDerivation` matters for runIf.
   mkEffect =
-    name:
+    name: after:
     {
       inherit name;
       inputDerivation = {
         inherit name;
         outPath = "/nix/store/fake-${name}";
       };
+      passthru = {
+        inherit after;
+        lock = null;
+        when = { };
+      };
+      inherit after;
     };
 
-  effectA = mkEffect "a";
-  effectB = mkEffect "b";
-  effectC = mkEffect "c";
+  effectA = mkEffect "a" [ ];
+  effectB = mkEffect "b" [ ];
+  effectC = mkEffect "c" [ ];
+  effectWithShortAfter = mkEffect "dep" [ "deploy" ];
+  effectWithFullAfter = mkEffect "dep" [
+    [
+      "deploy"
+      "default"
+    ]
+  ];
 in
 {
   # --- runIf ---
@@ -39,6 +53,28 @@ in
     };
   };
 
+  # --- normalizeAfter ---
+
+  testNormalizeAfterShortAndFull = {
+    expr = normalizeAfter [
+      "deploy"
+      [
+        "other"
+        "default"
+      ]
+    ];
+    expected = [
+      [
+        "deploy"
+        "default"
+      ]
+      [
+        "other"
+        "default"
+      ]
+    ];
+  };
+
   # --- mkOutputs ---
 
   testMkOutputsRoutesPushAndSchedule = {
@@ -46,9 +82,7 @@ in
       deploy = {
         on.push = true;
         on.schedule = null;
-        steps = {
-          push-image = effectA;
-        };
+        effect = effectA;
       };
       flake-update = {
         on.push = null;
@@ -56,16 +90,14 @@ in
           hour = [ 0 ];
           dayOfWeek = [ "Sun" ];
         };
-        steps = {
-          update = effectB;
-        };
+        effect = effectB;
       };
     };
     expected = {
       onPush = {
         deploy = {
           outputs.effects = {
-            push-image = { run = effectA; };
+            default = { run = effectA; };
           };
         };
       };
@@ -76,7 +108,7 @@ in
             dayOfWeek = [ "Sun" ];
           };
           outputs.effects = {
-            update = effectB;
+            default = effectB;
           };
         };
       };
@@ -90,16 +122,14 @@ in
       gated = {
         on.push = false;
         on.schedule = null;
-        steps = {
-          step = effectC;
-        };
+        effect = effectC;
       };
     };
     expected = {
       onPush = {
         gated = {
           outputs.effects = {
-            step = {
+            default = {
               dependencies = effectC.inputDerivation // {
                 isEffect = false;
                 buildDependenciesOnly = true;
@@ -117,9 +147,7 @@ in
       idle = {
         on.push = null;
         on.schedule = null;
-        steps = {
-          noop = effectA;
-        };
+        effect = effectA;
       };
     };
     expected = {
@@ -133,16 +161,14 @@ in
       dual = {
         on.push = true;
         on.schedule = { minute = 15; };
-        steps = {
-          work = effectA;
-        };
+        effect = effectA;
       };
     };
     expected = {
       onPush = {
         dual = {
           outputs.effects = {
-            work = { run = effectA; };
+            default = { run = effectA; };
           };
         };
       };
@@ -150,10 +176,43 @@ in
         dual = {
           when = { minute = 15; };
           outputs.effects = {
-            work = effectA;
+            default = effectA;
           };
         };
       };
+    };
+  };
+
+  testMkOutputsNormalizesAfter = {
+    expr = {
+      short = (mkOutputs {
+        work = {
+          on.push = true;
+          on.schedule = null;
+          effect = effectWithShortAfter;
+        };
+      }).onPush.work.outputs.effects.default.run.after;
+      full = (mkOutputs {
+        work = {
+          on.push = true;
+          on.schedule = null;
+          effect = effectWithFullAfter;
+        };
+      }).onPush.work.outputs.effects.default.run.after;
+    };
+    expected = {
+      short = [
+        [
+          "deploy"
+          "default"
+        ]
+      ];
+      full = [
+        [
+          "deploy"
+          "default"
+        ]
+      ];
     };
   };
 }

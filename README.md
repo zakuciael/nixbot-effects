@@ -2,7 +2,7 @@
 
 A [flake-parts](https://flake.parts) module for declaring [NixBot](https://github.com/Mic92/nixbot) effects using a syntax that resembles [GitHub Actions](https://docs.github.com/en/actions) workflow files.
 
-Instead of hand-writing the low-level `herculesCI.onPush.*.outputs.effects` attribute set, you describe _jobs_ with _steps_ and triggers (`on.push`, `on.schedule`) — and the module produces the `flake.herculesCI` output for you.
+Instead of hand-writing the low-level `herculesCI.onPush.*.outputs.effects` attribute set, you describe _jobs_ with a single _effect_ and triggers (`on.push`, `on.schedule`) — and the module produces the `flake.herculesCI` output for you.
 
 ---
 
@@ -39,13 +39,13 @@ Add the flake as an input and import its `flakeModule`:
 
 ### Declaring jobs
 
-A job is a set of _steps_ plus the events that trigger it. Each step is an effect built with `hci-effects.mkEffect`.
+A job is one effect plus the events that trigger it. Build the effect with `hci-effects.mkEffect`.
 
 ```nix
 { config, hci-effects, pkgs, self, ... }:
 {
   hci-effects.jobs = {
-    deploy = {
+    push-image = {
       # Run on pushes to main or any releases/* branch.
       on.push = {
         branches = [
@@ -54,27 +54,33 @@ A job is a set of _steps_ plus the events that trigger it. Each step is an effec
         ];
       };
 
-      steps = {
-        # Build and push the container image.
-        push-image = hci-effects.mkEffect {
-          inputs = [ pkgs.skopeo ];
-          effectScript = ''
-            skopeo copy --insecure-policy \
-              docker-archive:${self.packages.x86_64-linux.image} \
-              docker://registry.example.com/app:${config.repo.rev}
-          '';
-        };
+      effect = hci-effects.mkEffect {
+        inputs = [ pkgs.skopeo ];
+        effectScript = ''
+          skopeo copy --insecure-policy \
+            docker-archive:${self.packages.x86_64-linux.image} \
+            docker://registry.example.com/app:${config.repo.rev}
+        '';
+      };
+    };
 
-        # Only starts after `push-image` succeeded; the "staging" lock
-        # makes concurrent deployments take turns updating staging.
-        deploy-staging = hci-effects.mkEffect {
-          after = [ [ "deploy" "push-image" ] ];
-          lock = "staging";
-          inputs = [ pkgs.kubectl ];
-          effectScript = ''
-            kubectl set image deployment/app app=registry.example.com/app:${config.repo.rev}
-          '';
-        };
+    # Starts only after `push-image` succeeded; the "staging" lock
+    # makes concurrent deployments take turns updating staging.
+    deploy-staging = {
+      on.push = {
+        branches = [
+          "main"
+          "releases/*"
+        ];
+      };
+
+      effect = hci-effects.mkEffect {
+        after = [ "push-image" ];
+        lock = "staging";
+        inputs = [ pkgs.kubectl ];
+        effectScript = ''
+          kubectl set image deployment/app app=registry.example.com/app:${config.repo.rev}
+        '';
       };
     };
 
@@ -85,7 +91,7 @@ A job is a set of _steps_ plus the events that trigger it. Each step is an effec
         dayOfWeek = [ "Sun" ];
       };
 
-      steps.update = hci-effects.mkEffect {
+      effect = hci-effects.mkEffect {
         # Ask nixbot for a writable checkout so we can commit the new lock.
         checkout = true;
         effectScript = ''
@@ -99,7 +105,7 @@ A job is a set of _steps_ plus the events that trigger it. Each step is an effec
 }
 ```
 
-The module turns this into the `flake.herculesCI` output: `onPush.<job>` for jobs with a non-`null` `on.push`, and `onSchedule.<job>` for jobs with an `on.schedule`.
+The module turns this into the `flake.herculesCI` output: `onPush.<job>.outputs.effects.default` for jobs with a non-`null` `on.push`, and `onSchedule.<job>.outputs.effects.default` for jobs with an `on.schedule`.
 
 ---
 
@@ -125,7 +131,7 @@ Produces an effect derivation, the function accepts the following arguments:
 | `secretsMap`       | `attrs`  | A map of named secrets to expose to the effect, see [Secrets](https://docs.hercules-ci.com/hercules-ci-agent/effects/declaration/#secrets).                                                                                      |
 | `checkout`         | `bool`   | Request a pushable repository checkout at `/build/checkout` (exported as `$NIXBOT_EFFECT_CHECKOUT`), see [Pushable repository checkout](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#pushable-repository-checkout). |
 | `idTokenAudiences` | `list`   | Audiences for which this effect may request workload-identity ID tokens, see [Workload identity](https://github.com/Mic92/nixbot/blob/main/docs/WORKLOAD_IDENTITY.md).                                                           |
-| `after`            | `list`   | Attribute paths of effects that must succeed first, e.g. `[ [ "deploy" "push-image" ] ]`, see [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks).                                |
+| `after`            | `list`   | Effects that must succeed first. Prefer short job names (`[ "push-image" ]`); full paths (`[ [ "push-image" "default" ] ]`) also work. See [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks). |
 | `lock`             | `string` | Named lock, see [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks).                                                                                                              |
 
 Any additional attribute given to `mkEffect` is passed straight through to `mkDerivation`, so you can set things like environment variables (`NIX_CONFIG = "..."`), hooks, or any other derivation attribute.
@@ -173,26 +179,32 @@ Runs a Terraform/OpenTofu CLI command (e.g. `plan` or `apply`) against the check
 It requests a pushable checkout. Since arbitrary derivations cover the `plan`/`apply` split, use `after` to order effects that apply after a plan passes review.
 
 ```nix
-hci-effects.jobs.deploy.steps = {
-  plan = hci-effects.runTerraform {
-    # `opentofu init` runs automatically before this.
-    extraArgs = "-lock-timeout=5m";
+hci-effects.jobs = {
+  plan = {
+    on.push = true;
+    effect = hci-effects.runTerraform {
+      # `opentofu init` runs automatically before this.
+      extraArgs = "-lock-timeout=5m";
+    };
   };
-  apply = hci-effects.runTerraform {
-    after = [ [ "deploy" "plan" ] ];
-    command = "apply";
-    extraArgs = "-auto-approve";
+  apply = {
+    on.push = true;
+    effect = hci-effects.runTerraform {
+      after = [ "plan" ];
+      command = "apply";
+      extraArgs = "-auto-approve";
+    };
   };
 };
 ```
 
-### `hci-effects.jobs.<job-id>.steps.<name>`
+### `hci-effects.jobs.<job-id>.effect`
 
-A step is any Nix package (an effect derivation). You normally create it with `hci-effects.mkEffect`.
+The job's effect derivation. You normally create it with `hci-effects.mkEffect`. Emitted as `onPush` / `onSchedule` → `outputs.effects.default`.
 
 ### `hci-effects.jobs.<job-id>.on`
 
-A job may set `push`, `schedule`, or both at once; jobs with neither are ignored.
+A job must set `push`, `schedule`, or both. Jobs with neither fail evaluation.
 
 #### `on.push`
 
@@ -242,10 +254,13 @@ Read-only repository metadata for the current checkout. Query it via the `config
 ```nix
 { config, ... }:
 {
-  hci-effects.jobs.deploy.steps.print = hci-effects.mkEffect {
-    effectScript = ''
-      echo "${config.repo.rev}"
-    '';
+  hci-effects.jobs.deploy = {
+    on.push = true;
+    effect = hci-effects.mkEffect {
+      effectScript = ''
+        echo "${config.repo.rev}"
+      '';
+    };
   };
 }
 ```

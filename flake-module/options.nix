@@ -34,8 +34,12 @@ in
               type = types.lazyAttrsOf (
                 types.submodule {
                   options = {
-                    steps = mkOption {
-                      type = types.lazyAttrsOf types.package;
+                    effect = mkOption {
+                      type = types.package;
+                      description = ''
+                        The single effect derivation for this job. Emitted as
+                        `outputs.effects.default` under `onPush` / `onSchedule`.
+                      '';
                     };
                     on = {
                       push = onPush.option;
@@ -105,13 +109,18 @@ in
           };
           # Collapse filter attrsets to bool so herculesCI.nix can keep using runIf.
           jobs = mapAttrs (
-            _: job:
-            job
-            // {
-              on = job.on // {
-                push = onPush.resolvePush evaluated.config.repo job.on.push;
-              };
-            }
+            name: job:
+            if job.on.push == null && job.on.schedule == null then
+              throw ''
+                hci-effects.jobs.${name}: at least one of `on.push` or `on.schedule` must be set.
+              ''
+            else
+              job
+              // {
+                on = job.on // {
+                  push = onPush.resolvePush evaluated.config.repo job.on.push;
+                };
+              }
           ) evaluated.config.jobs;
         in
         jobs;
