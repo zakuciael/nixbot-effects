@@ -46,12 +46,11 @@ A job is a set of _steps_ plus the events that trigger it. Each step is an effec
 {
   hci-effects.jobs = {
     deploy = {
-      # Run on pushes to main or release branches (not alpha).
+      # Run on pushes to main or any releases/* branch.
       on.push = {
         branches = [
           "main"
-          "releases/**"
-          "!releases/**-alpha"
+          "releases/*"
         ];
       };
 
@@ -205,24 +204,22 @@ You can still write a manual condition:
 on.push = config.repo.branch == "main";
 ```
 
-Or use GitHub Actions-style filters (matched against `config.repo.branch` / `config.repo.tag`):
+Or use positive fnmatch filters (matched against `config.repo.branch` / `config.repo.tag`):
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
-| `branches` | string or list of strings | Include branch name patterns. Use ordered `!` entries to exclude after including. Cannot be set with `branchesIgnore`. |
-| `branchesIgnore` | string or list of strings | Exclude-only branch patterns. Cannot be set with `branches`. No `!` prefixes. |
-| `tags` | string or list of strings | Include tag name patterns (same `!` rules as `branches`). Cannot be set with `tagsIgnore`. |
-| `tagsIgnore` | string or list of strings | Exclude-only tag patterns. Cannot be set with `tags`. No `!` prefixes. |
+| `branches` | string or list of strings | Run on a branch push when any pattern matches. Empty list ≡ omit. |
+| `tags` | string or list of strings | Run on a tag push when any pattern matches. Empty list ≡ omit. |
 
-Semantics match [GitHub Actions `on.push` filters](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushbranchestagsbranches-ignoretags-ignore):
+Semantics:
 
-- Only branch filters set → tag pushes do not run (and the other way around).
-- Neither filter family set → both branches and tags run.
-- Patterns use the Actions filter syntax: `*`, `**`, `?`, `+`, `[]`, `\`, and leading `!` on include lists.
+- Only `branches` set → tag pushes do not run (and the other way around).
+- Neither set → both branches and tags run.
+- Patterns use Python/`fnmatch` syntax (`*`, `?`, `[]`, `[!]`), the same dialect nixbot uses for event conditions. `*` matches across `/`.
 
 ```nix
 on.push = {
-  branches = [ "main" "releases/**" "!releases/**-alpha" ];
+  branches = [ "main" "releases/*" ];
   tags = [ "v*" ];
 };
 ```
