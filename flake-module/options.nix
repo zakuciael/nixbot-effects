@@ -65,7 +65,7 @@ in
                 rootConfig.perInput system self
               );
 
-              systemConfig = getSystem system;
+              config' = builtins.addErrorContext "while retrieving system-dependent config" (getSystem system);
             };
           };
         }
