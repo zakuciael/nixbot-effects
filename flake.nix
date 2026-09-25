@@ -7,12 +7,26 @@
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
+    nix-unit = {
+      url = "github:nix-community/nix-unit";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    inputs@{ flake-parts, ... }:
+    inputs@{
+      nixpkgs,
+      flake-parts,
+      nix-unit,
+      ...
+    }:
     flake-parts.lib.mkFlake { inherit inputs; } (
-      { self, ... }: {
+      { self, ... }:
+      {
+        imports = [
+          nix-unit.modules.flake.default
+        ];
+
         systems = [
           "x86_64-linux"
           "aarch64-linux"
@@ -22,6 +36,13 @@
         flake = {
           flakeModule = self.flakeModules.default;
           flakeModules.default = ./flake-module/default.nix;
+        };
+
+        perSystem = { lib, ... }: {
+          nix-unit = {
+            inputs = { inherit nixpkgs flake-parts nix-unit; };
+            tests = import ./tests/on-push.nix { inherit lib; };
+          };
         };
       }
     );

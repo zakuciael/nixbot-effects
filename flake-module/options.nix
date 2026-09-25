@@ -16,6 +16,9 @@ let
   inherit (flake-parts-lib) mkPerSystemType;
 
   rootConfig = config;
+
+  onPush = import ./types/on-push.nix { inherit lib; };
+  onSchedule = import ./types/on-schedule.nix { inherit lib; };
 in
 {
   options = {
@@ -35,8 +38,8 @@ in
                       type = types.lazyAttrsOf types.package;
                     };
                     on = {
-                      push = (import ./types/on-push.nix { inherit lib; }).option;
-                      schedule = (import ./types/on-schedule.nix { inherit lib; }).option;
+                      push = onPush.option;
+                      schedule = onSchedule.option;
                     };
                   };
                 }
@@ -70,35 +73,48 @@ in
 
       apply =
         modules: primaryRepo:
-        (lib.evalModules {
-          modules = [
-            {
-              _file = "herculesCI parameters";
-              config = {
-                # Filter out values which are unavailable and therefore null.
-                repo = {
-                  inherit (primaryRepo) ref rev shortRev;
-                  branch = primaryRepo.branch or null;
-                  tag = primaryRepo.tag or null;
-                }
-                // lib.filterAttrs (k: v: v != null) {
-                  remoteHttpUrl = primaryRepo.remoteHttpUrl or null;
-                  remoteSshUrl = primaryRepo.remoteSshUrl or null;
-                  webUrl = primaryRepo.webUrl or null;
-                  forgeType = primaryRepo.forgeType or null;
-                  owner = primaryRepo.owner or null;
-                  name = primaryRepo.name or null;
+        let
+          evaluated = lib.evalModules {
+            modules = [
+              {
+                _file = "herculesCI parameters";
+                config = {
+                  # Filter out values which are unavailable and therefore null.
+                  repo = {
+                    inherit (primaryRepo) ref rev shortRev;
+                    branch = primaryRepo.branch or null;
+                    tag = primaryRepo.tag or null;
+                  }
+                  // lib.filterAttrs (k: v: v != null) {
+                    remoteHttpUrl = primaryRepo.remoteHttpUrl or null;
+                    remoteSshUrl = primaryRepo.remoteSshUrl or null;
+                    webUrl = primaryRepo.webUrl or null;
+                    forgeType = primaryRepo.forgeType or null;
+                    owner = primaryRepo.owner or null;
+                    name = primaryRepo.name or null;
+                  };
                 };
+              }
+            ]
+            ++ modules;
+            prefix = [ "hci-effects" ];
+            specialArgs = {
+              system = config.defaultEffectSystem;
+            };
+            class = "hci-effects";
+          };
+          # Collapse filter attrsets to bool so herculesCI.nix can keep using runIf.
+          jobs = mapAttrs (
+            _: job:
+            job
+            // {
+              on = job.on // {
+                push = onPush.resolvePush evaluated.config.repo job.on.push;
               };
             }
-          ]
-          ++ modules;
-          prefix = [ "hci-effects" ];
-          specialArgs = {
-            system = config.defaultEffectSystem;
-          };
-          class = "hci-effects";
-        }).config.jobs;
+          ) evaluated.config.jobs;
+        in
+        jobs;
     };
   };
 }
