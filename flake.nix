@@ -45,7 +45,7 @@
             inputs = { inherit nixpkgs flake-parts nix-unit; };
             tests = {
               on-push = import ./tests/on-push.nix { inherit lib; };
-              github-glob = import ./tests/github-glob.nix { inherit lib; };
+              fnmatch = import ./tests/fnmatch.nix { inherit lib; };
               hercules-ci = import ./tests/hercules-ci.nix { inherit lib; };
             };
           };
