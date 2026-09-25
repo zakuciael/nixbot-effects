@@ -43,7 +43,11 @@
         perSystem = { lib, ... }: {
           nix-unit = {
             inputs = { inherit nixpkgs flake-parts nix-unit; };
-            tests = import ./tests/on-push.nix { inherit lib; };
+            tests = {
+              on-push = import ./tests/on-push.nix { inherit lib; };
+              github-glob = import ./tests/github-glob.nix { inherit lib; };
+              hercules-ci = import ./tests/hercules-ci.nix { inherit lib; };
+            };
           };
         };
       }
