@@ -19,6 +19,12 @@ let
     builtins.readFile ./scripts/nixbot-id-token.py
   );
 
+  # Posts/updates a PR comment from an onEvent effect, see docs/EFFECTS.md.
+  prCommentScript = writers.writePython3Bin "nixbot-pr-comment" { } (
+    builtins.readFile ./scripts/nixbot-pr-comment.py
+  );
+
+  # Adds Hercules CI utility scripts into the sandbox.
   effectSetupHook = runCommand "effects-setup-hook-sh" { } ''
     mkdir -p $out/nix-support
     cp ${./scripts/effects-setup-hook.sh} $out/nix-support/setup-hook
@@ -76,6 +82,7 @@ stdenvNoCC.mkDerivation (
       curl
       jq
       effectSetupHook
+      prCommentScript
     ]
     ++ (if idTokenAudiences != [ ] then [ idTokenScript ] else [ ])
     ++ inputs;
