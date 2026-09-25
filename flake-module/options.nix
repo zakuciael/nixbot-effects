@@ -19,6 +19,7 @@ let
 
   onPush = import ./types/on-push.nix { inherit lib; };
   onSchedule = import ./types/on-schedule.nix { inherit lib; };
+  onEvent = import ./types/on-event.nix { inherit lib; };
 in
 {
   options = {
@@ -38,13 +39,15 @@ in
                       type = types.package;
                       description = ''
                         The single effect derivation for this job. Emitted as
-                        `outputs.effects.default` under `onPush` / `onSchedule`.
+                        `outputs.effects.default` under `onPush` / `onSchedule`,
+                        or as `onEvent.<kind>.<job>` for event triggers.
                       '';
                     };
                     on = {
                       push = onPush.option;
                       schedule = onSchedule.option;
-                    };
+                    }
+                    // onEvent.onOptions;
                   };
                 }
               );
@@ -108,11 +111,23 @@ in
             class = "hci-effects";
           };
           # Collapse filter attrsets to bool so herculesCI.nix can keep using runIf.
+          # Enforce trigger rules: ≥1 trigger; events exclusive from push/schedule.
           jobs = mapAttrs (
             name: job:
-            if job.on.push == null && job.on.schedule == null then
+            let
+              hasEvent = onEvent.jobHasEvent job;
+              hasPushOrSchedule = onEvent.jobHasPushOrSchedule job;
+            in
+            if !hasEvent && !hasPushOrSchedule then
               throw ''
-                hci-effects.jobs.${name}: at least one of `on.push` or `on.schedule` must be set.
+                hci-effects.jobs.${name}: at least one trigger must be set
+                (`on.push`, `on.schedule`, or an `on.<event>`).
+              ''
+            else if hasEvent && hasPushOrSchedule then
+              throw ''
+                hci-effects.jobs.${name}: event triggers (`on.pull_request`,
+                `on.comment`, `on.pull_request_closed`, `on.build_finished`)
+                cannot be combined with `on.push` or `on.schedule`.
               ''
             else
               job

@@ -2,7 +2,7 @@
 
 A [flake-parts](https://flake.parts) module for declaring [NixBot](https://github.com/Mic92/nixbot) effects using a syntax that resembles [GitHub Actions](https://docs.github.com/en/actions) workflow files.
 
-Instead of hand-writing the low-level `herculesCI.onPush.*.outputs.effects` attribute set, you describe _jobs_ with a single _effect_ and triggers (`on.push`, `on.schedule`) — and the module produces the `flake.herculesCI` output for you.
+Instead of hand-writing the low-level `herculesCI.onPush.*.outputs.effects` attribute set, you describe _jobs_ with a single _effect_ and triggers (`on.push`, `on.schedule`, or `on.<event>`) — and the module produces the `flake.herculesCI` output for you.
 
 ---
 
@@ -105,7 +105,7 @@ A job is one effect plus the events that trigger it. Build the effect with `hci-
 }
 ```
 
-The module turns this into the `flake.herculesCI` output: `onPush.<job>.outputs.effects.default` for jobs with a non-`null` `on.push`, and `onSchedule.<job>.outputs.effects.default` for jobs with an `on.schedule`.
+The module turns this into the `flake.herculesCI` output: `onPush.<job>.outputs.effects.default` for jobs with a non-`null` `on.push`, `onSchedule.<job>.outputs.effects.default` for jobs with an `on.schedule`, and `onEvent.<kind>.<job>` for event triggers.
 
 ---
 
@@ -131,8 +131,9 @@ Produces an effect derivation, the function accepts the following arguments:
 | `secretsMap`       | `attrs`  | A map of named secrets to expose to the effect, see [Secrets](https://docs.hercules-ci.com/hercules-ci-agent/effects/declaration/#secrets).                                                                                      |
 | `checkout`         | `bool`   | Request a pushable repository checkout at `/build/checkout` (exported as `$NIXBOT_EFFECT_CHECKOUT`), see [Pushable repository checkout](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#pushable-repository-checkout). |
 | `idTokenAudiences` | `list`   | Audiences for which this effect may request workload-identity ID tokens, see [Workload identity](https://github.com/Mic92/nixbot/blob/main/docs/WORKLOAD_IDENTITY.md).                                                           |
-| `after`            | `list`   | Effects that must succeed first. Prefer short job names (`[ "push-image" ]`); full paths (`[ [ "push-image" "default" ] ]`) also work. See [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks). |
-| `lock`             | `string` | Named lock, see [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks).                                                                                                              |
+| `after`            | `list`   | Effects that must succeed first (push/schedule only). Prefer short job names (`[ "push-image" ]`); full paths (`[ [ "push-image" "default" ] ]`) also work. Not allowed on event jobs. See [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks). |
+| `lock`             | `string` | Named lock (`{pr}` is expanded on event effects), see [Ordering and locks](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#ordering-and-locks).                                                                                                              |
+| `when`             | `attrs`  | Do not set on event jobs — use `on.<event>` instead. Ignored for push/schedule.                                                                                                                                                |
 
 Any additional attribute given to `mkEffect` is passed straight through to `mkDerivation`, so you can set things like environment variables (`NIX_CONFIG = "..."`), hooks, or any other derivation attribute.
 
@@ -200,11 +201,11 @@ hci-effects.jobs = {
 
 ### `hci-effects.jobs.<job-id>.effect`
 
-The job's effect derivation. You normally create it with `hci-effects.mkEffect`. Emitted as `onPush` / `onSchedule` → `outputs.effects.default`.
+The job's effect derivation. You normally create it with `hci-effects.mkEffect`. Emitted as `onPush` / `onSchedule` → `outputs.effects.default`, or as `onEvent.<kind>.<job>` for event triggers.
 
 ### `hci-effects.jobs.<job-id>.on`
 
-A job must set `push`, `schedule`, or both. Jobs with neither fail evaluation.
+A job must set at least one trigger. `on.push` and `on.schedule` may be combined. Event triggers (`pull_request`, `comment`, `pull_request_closed`, `build_finished`) may be combined with each other, but not with `push` / `schedule`.
 
 #### `on.push`
 
@@ -246,6 +247,51 @@ on.push = {
 - `dayOfMonth` — `null` or list of ints `0..31`
 
 All values are equality constraints evaluated in **UTC**. If `minute` or `hour` is omitted, an arbitrary time is picked. See the [hercules-ci-effects schedule reference](https://docs.hercules-ci.com/hercules-ci-effects/) for details.
+
+#### `on.pull_request` / `on.comment` / `on.pull_request_closed` / `on.build_finished`
+
+nixbot [event effects](https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md#event-effects-onevent). `null` (default), `true` (empty `when`), or a `when` attribute set copied onto the emitted effect.
+
+| `when` key | Type | Allowed on |
+| --- | --- | --- |
+| `permission` | `read` \| `write` \| `admin` | all four |
+| `branches` | string or list (fnmatch) | all four |
+| `status` | `succeeded` \| `failed` (or list) | all four |
+| `labels` | string or list | `pull_request`, `pull_request_closed`, `comment` |
+| `modified` | string or list (fnmatch) | `pull_request`, `pull_request_closed`, `comment` |
+| `commands` | string or list | `comment` only |
+| `transition` | `broke` \| `fixed` | `build_finished` only |
+
+```nix
+hci-effects.jobs = {
+  plan = {
+    on.pull_request = {
+      permission = "write";
+    };
+    on.comment = {
+      commands = [ "plan" ];
+      permission = "write";
+    };
+    effect = hci-effects.mkEffect {
+      checkout = true;
+      lock = "infra";
+      effectScript = ''
+        tofu plan -no-color | nixbot-pr-comment --replace-marker plan
+      '';
+    };
+  };
+
+  broke = {
+    on.build_finished = {
+      branches = [ "main" ];
+      transition = "broke";
+    };
+    effect = hci-effects.mkEffect {
+      effectScript = ''echo "main broke: $NIXBOT_BUILD_URL"'';
+    };
+  };
+};
+```
 
 ### `hci-effects.repo`
 

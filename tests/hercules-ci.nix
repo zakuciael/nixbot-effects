@@ -1,15 +1,16 @@
-# nix-unit tests for herculesCI pure helpers (`runIf`, `mkOutputs`).
+# nix-unit tests for herculesCI pure helpers (`runIf`, `mkOutputs`, onEvent).
 { lib }:
 let
   inherit (import ../flake-module/hercules-ci-lib.nix { inherit lib; })
     runIf
     mkOutputs
     normalizeAfter
+    withEventWhen
     ;
 
   # Stand-in for an effect derivation; only `inputDerivation` matters for runIf.
   mkEffect =
-    name: after:
+    name: after: when:
     {
       inherit name;
       inputDerivation = {
@@ -17,23 +18,31 @@ let
         outPath = "/nix/store/fake-${name}";
       };
       passthru = {
-        inherit after;
+        inherit after when;
         lock = null;
-        when = { };
       };
-      inherit after;
+      inherit after when;
     };
 
-  effectA = mkEffect "a" [ ];
-  effectB = mkEffect "b" [ ];
-  effectC = mkEffect "c" [ ];
-  effectWithShortAfter = mkEffect "dep" [ "deploy" ];
+  effectA = mkEffect "a" [ ] { };
+  effectB = mkEffect "b" [ ] { };
+  effectC = mkEffect "c" [ ] { };
+  effectWithShortAfter = mkEffect "dep" [ "deploy" ] { };
   effectWithFullAfter = mkEffect "dep" [
     [
       "deploy"
       "default"
     ]
-  ];
+  ] { };
+  effectWithWhen = mkEffect "gated" [ ] { permission = "write"; };
+  effectWithAfter = mkEffect "ordered" [ "other" ] { };
+
+  nullEvents = {
+    pull_request = null;
+    comment = null;
+    pull_request_closed = null;
+    build_finished = null;
+  };
 in
 {
   # --- runIf ---
@@ -80,16 +89,22 @@ in
   testMkOutputsRoutesPushAndSchedule = {
     expr = mkOutputs {
       deploy = {
-        on.push = true;
-        on.schedule = null;
+        on = {
+          push = true;
+          schedule = null;
+        }
+        // nullEvents;
         effect = effectA;
       };
       flake-update = {
-        on.push = null;
-        on.schedule = {
-          hour = [ 0 ];
-          dayOfWeek = [ "Sun" ];
-        };
+        on = {
+          push = null;
+          schedule = {
+            hour = [ 0 ];
+            dayOfWeek = [ "Sun" ];
+          };
+        }
+        // nullEvents;
         effect = effectB;
       };
     };
@@ -112,16 +127,18 @@ in
           };
         };
       };
+      onEvent = { };
     };
   };
 
   testMkOutputsKeepsFalsePushAsDependencies = {
-    # `on.push = false` still declares the job for push events; effects are
-    # dependency-only via runIf.
     expr = mkOutputs {
       gated = {
-        on.push = false;
-        on.schedule = null;
+        on = {
+          push = false;
+          schedule = null;
+        }
+        // nullEvents;
         effect = effectC;
       };
     };
@@ -139,28 +156,36 @@ in
         };
       };
       onSchedule = { };
+      onEvent = { };
     };
   };
 
   testMkOutputsOmitsNullTriggers = {
     expr = mkOutputs {
       idle = {
-        on.push = null;
-        on.schedule = null;
+        on = {
+          push = null;
+          schedule = null;
+        }
+        // nullEvents;
         effect = effectA;
       };
     };
     expected = {
       onPush = { };
       onSchedule = { };
+      onEvent = { };
     };
   };
 
   testMkOutputsBothTriggers = {
     expr = mkOutputs {
       dual = {
-        on.push = true;
-        on.schedule = { minute = 15; };
+        on = {
+          push = true;
+          schedule = { minute = 15; };
+        }
+        // nullEvents;
         effect = effectA;
       };
     };
@@ -180,6 +205,7 @@ in
           };
         };
       };
+      onEvent = { };
     };
   };
 
@@ -187,15 +213,21 @@ in
     expr = {
       short = (mkOutputs {
         work = {
-          on.push = true;
-          on.schedule = null;
+          on = {
+            push = true;
+            schedule = null;
+          }
+          // nullEvents;
           effect = effectWithShortAfter;
         };
       }).onPush.work.outputs.effects.default.run.after;
       full = (mkOutputs {
         work = {
-          on.push = true;
-          on.schedule = null;
+          on = {
+            push = true;
+            schedule = null;
+          }
+          // nullEvents;
           effect = effectWithFullAfter;
         };
       }).onPush.work.outputs.effects.default.run.after;
@@ -214,5 +246,84 @@ in
         ]
       ];
     };
+  };
+
+  testMkOutputsOnEvent = {
+    expr =
+      let
+        out = mkOutputs {
+          plan = {
+            on = {
+              push = null;
+              schedule = null;
+              pull_request = {
+                permission = "write";
+                labels = [ "preview" ];
+                branches = null;
+                status = null;
+                modified = null;
+              };
+              comment = {
+                commands = [ "plan" ];
+                permission = "write";
+                branches = null;
+                status = null;
+                labels = null;
+                modified = null;
+              };
+              pull_request_closed = null;
+              build_finished = null;
+            };
+            effect = effectA;
+          };
+          broke = {
+            on = {
+              push = null;
+              schedule = null;
+              pull_request = null;
+              comment = null;
+              pull_request_closed = null;
+              build_finished = {
+                transition = "broke";
+                branches = [ "main" ];
+                permission = null;
+                status = null;
+              };
+            };
+            effect = effectB;
+          };
+        };
+      in
+      {
+        planPrWhen = out.onEvent.pull_request.plan.when;
+        planCommentWhen = out.onEvent.comment.plan.when;
+        brokeWhen = out.onEvent.build_finished.broke.when;
+        noClosed = out.onEvent ? pull_request_closed;
+      };
+    expected = {
+      planPrWhen = {
+        permission = "write";
+        labels = [ "preview" ];
+      };
+      planCommentWhen = {
+        commands = [ "plan" ];
+        permission = "write";
+      };
+      brokeWhen = {
+        transition = "broke";
+        branches = [ "main" ];
+      };
+      noClosed = false;
+    };
+  };
+
+  testWithEventWhenRejectsExistingWhen = {
+    expr = (builtins.tryEval (withEventWhen "plan" "pull_request" { } effectWithWhen)).success;
+    expected = false;
+  };
+
+  testWithEventWhenRejectsAfter = {
+    expr = (builtins.tryEval (withEventWhen "plan" "pull_request" { } effectWithAfter)).success;
+    expected = false;
   };
 }
