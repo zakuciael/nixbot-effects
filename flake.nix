@@ -47,6 +47,7 @@
               on-push = import ./tests/on-push.nix { inherit lib; };
               fnmatch = import ./tests/fnmatch.nix { inherit lib; };
               hercules-ci = import ./tests/hercules-ci.nix { inherit lib; };
+              on-event = import ./tests/on-event.nix { inherit lib; };
             };
           };
         };
