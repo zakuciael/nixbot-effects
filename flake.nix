@@ -23,6 +23,8 @@
     flake-parts.lib.mkFlake { inherit inputs; } (
       { self, ... }:
       {
+        debug = true;
+
         imports = [
           nix-unit.modules.flake.default
         ];
