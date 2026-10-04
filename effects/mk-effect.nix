@@ -10,7 +10,12 @@
   lib,
 }:
 let
-  inherit (lib) getExe;
+  inherit (lib)
+    getExe
+    filter
+    concatStringsSep
+    splitString
+    ;
 
   # Fetches a workload-identity ID token from nixbot inside the effect
   # sandbox, see docs/WORKLOAD_IDENTITY.md. --json prints the raw
@@ -24,10 +29,19 @@ let
     builtins.readFile ./scripts/nixbot-pr-comment.py
   );
 
-  # Adds Hercules CI utility scripts into the sandbox.
-  effectSetupHook = runCommand "effects-setup-hook-sh" { } ''
+  # hercules-ci-effects' shell functions (readSecretString, writeSSHKey,
+  # getStateFile, ...). Same derivation name as upstream's.
+  effectSetupHook = runCommand "effects-setup-hook-sh" { } /* bash */ ''
     mkdir -p $out/nix-support
-    cp ${./scripts/effects-setup-hook.sh} $out/nix-support/setup-hook
+    # The headers file holds the task token. Upstream puts it in $PWD, which
+    # is the repository clone with checkout = true; $TMPDIR is /build.
+    sed 's|\$PWD/hercules-ci.headers|$TMPDIR/hercules-ci.headers|' \
+      ${./scripts/effects-setup-hook.sh} >$out/nix-support/setup-hook
+  '';
+
+  customFunctions = runCommand "effects-custom-funcs-sh" { } /* bash */ ''
+    mkdir -p $out/nix-support
+    cp ${./scripts/effects-custom-funcs.sh} $out/nix-support/setup-hook
   '';
 in
 
@@ -37,8 +51,7 @@ in
   userSetupScript ? "",
   inputs ? [ ],
   secretsMap ? { },
-  getStateScript ? "",
-  putStateScript ? "",
+
   # Pushable repository checkout at /build/checkout ($NIXBOT_EFFECT_CHECKOUT),
   # see https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md
   checkout ? false,
@@ -54,16 +67,37 @@ in
   # onEvent only: conditions nixbot checks against the event before
   # running, see https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md. `lock` may contain `{pr}` there.
   when ? { },
+
+  getStateScript ? "",
+  putStateScript ? "",
+  priorCheckScript ? "",
+  effectCheckScript ? "",
+  preGetStatePhases ? "",
+  preEffectPhases ? "priorCheckPhase",
+  postEffectPhases ? "effectCheckPhase",
+  passthru ? { },
+  # Like upstream's mkEffect, any other attribute goes to mkDerivation
+  # (e.g. runNixOS sets dontUnpack and passthru.prebuilt).
   ...
 }@args:
 stdenvNoCC.mkDerivation (
-  {
+  removeAttrs args [
+    "inputs"
+    "checkout"
+    "idTokenAudiences"
+    "after"
+    "lock"
+    "when"
+  ]
+  // {
     inherit
       name
       effectScript
       userSetupScript
       getStateScript
       putStateScript
+      priorCheckScript
+      effectCheckScript
       ;
     # Attr paths are nested lists, which cannot be coerced into
     # derivation env vars; expose them via passthru instead.
@@ -86,29 +120,37 @@ stdenvNoCC.mkDerivation (
       curl
       jq
       effectSetupHook
+      customFunctions
       prCommentScript
     ]
     ++ (if idTokenAudiences != [ ] then [ idTokenScript ] else [ ])
     ++ inputs;
 
-    phases = [
-      "initPhase"
-      "getStatePhase"
-      "userSetupPhase"
-      "effectPhase"
-      "putStatePhase"
-    ];
+    phases =
+      [
+        "initPhase"
+        preGetStatePhases
+        "getStatePhase"
+        "userSetupPhase"
+        preEffectPhases
+        "effectPhase"
+        "putStatePhase"
+        postEffectPhases
+      ]
+      |> filter (p: p != "")
+      |> concatStringsSep " "
+      |> splitString " ";
 
-    userSetupPhase = ''
-      runHook preUserSetup
-      eval "$userSetupScript"
-      runHook postUserSetup
-    '';
-
-    effectPhase = ''
-      runHook preEffect
-      eval "$effectScript"
-      runHook postEffect
+    initPhase = ''
+      exec </dev/null
+      # The setup hook prepares the state API's credentials here.
+      runHook preInit
+      export HOME=/build/home
+      mkdir -p "$HOME"
+      echo "root:x:$(id -u):$(id -g):root:$HOME:/bin/sh" >> /etc/passwd
+      mkdir -p ~/.ssh
+      echo "BatchMode yes" >> ~/.ssh/config
+      runHook postInit
     '';
 
     getStatePhase = ''
@@ -118,25 +160,41 @@ stdenvNoCC.mkDerivation (
       registerPutStatePhaseOnFailure
     '';
 
+    userSetupPhase = ''
+      runHook preUserSetup
+      eval "$userSetupScript"
+      runHook postUserSetup
+    '';
+
+    # A failing check must not stop the effect: it may fix the problem.
+    priorCheckPhase = ''
+      runHook prePriorCheck
+      if [[ -n "$priorCheckScript" ]] && ! eval "$priorCheckScript"; then
+        echo 1>&2 "WARNING: prior check failed, continuing"
+      fi
+      runHook postPriorCheck
+    '';
+
+    effectPhase = ''
+      runHook preEffect
+      eval "$effectScript"
+      runHook postEffect
+    '';
+
+    # Runs on failure too, see registerPutStatePhaseOnFailure.
     putStatePhase = ''
       if [[ -z ''${PUT_STATE_DONE:-} ]]; then
         runHook prePutState
         eval "$putStateScript"
         runHook postPutState
         PUT_STATE_DONE=true
-      else
-        echo 1>&2 "NOTE: State has already been uploaded and was not uploaded again."
       fi
     '';
 
-    initPhase = ''
-      exec </dev/null
-      export HOME=/build/home
-      mkdir -p "$HOME"
-      echo "root:x:$(id -u):$(id -g):root:$HOME:/bin/sh" >> /etc/passwd
-      mkdir -p ~/.ssh
-      echo "BatchMode yes" >> ~/.ssh/config
+    effectCheckPhase = ''
+      runHook preEffectCheck
+      eval "$effectCheckScript"
+      runHook postEffectCheck
     '';
   }
-  // args
 )

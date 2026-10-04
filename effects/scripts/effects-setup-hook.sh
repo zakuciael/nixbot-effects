@@ -1,25 +1,54 @@
-putStatePhaseOnFailure() {
-  if [[ -n $putStatePhase ]]; then
-    echo 'uploading state files after failure' 1>&2
-    eval "$putStatePhase"
+# Vendored verbatim from hercules-ci-effects
+# (effects/effect/effects-setup-hook.sh at
+# 6c58de7236d1cd634deea07bd15d52c7ce470bd3), so effects written for its
+# mkEffect find the same shell functions: readSecretString, writeSSHKey,
+# getStateFile, ...
+#
+# Copyright Hercules CI and contributors.
+# Licensed under the Apache License, Version 2.0:
+# https://github.com/hercules-ci/hercules-ci-effects/blob/master/LICENSE
+###
+### Nixpkgs / stdenv / setup.sh hook for Hercules CI Effects
+###
+### hercules-ci-effects uses stdenv and setup.sh to structure its effects.
+### This file is sourced by setup.sh and contains the logic to set up the
+### environment for the effect.
+###
+### The effect sandbox environment is similar to that of a Nix build, but
+### with some differences. This file closes that gap a bit and provides
+### some effect-specific utilities.
+
+# ----------------------------------------------------------------------------
+# compat logic for hercules-ci-agent <= 0.10.5 to support __hci_effect_fsroot_copy
+
+installFSRootFiles() {
+  # Requires rw root or hercules-ci-agent > 0.10.5 (TBD)
+  if [[ -z "${__hci_effect_fsroot_copied:-}" && -n "${__hci_effect_fsroot_copy:-}" ]]; then
+    cp --no-preserve=ownership --recursive --reflink=auto -T "$__hci_effect_fsroot_copy"/ /
   fi
 }
+preInitHooks+=("installFSRootFiles")
 
-registerPutStatePhaseOnFailure() {
-  failureHooks=("putStatePhaseOnFailure" "${failureHooks[@]}")
+# ----------------------------------------------------------------------------
+# prepare headers file for curl to talk to Hercules CI
+
+initHerculesCIAPI() {
+  herculesCIHeaders=$PWD/hercules-ci.headers
+  jq <"$HERCULES_CI_SECRETS_JSON" >$herculesCIHeaders -r '"Authorization: Bearer \(."hercules-ci".data.token)"'
 }
+preInitHooks+=("initHerculesCIAPI")
+
+# ----------------------------------------------------------------------------
+# state crud
 
 getStateFile() {
   local stateName="$1"
   local stateFileName="${2:-$1}"
-  local apiToken
-  apiToken=$(jq -r '.["hercules-ci"].data.token' "$HERCULES_CI_SECRETS_JSON")
-
   echo 1>&2 "fetching state file $stateName"
   while true; do
     http_code=$(
       curl \
-        -H "Authorization: Bearer $apiToken" \
+        -H @$herculesCIHeaders \
         --retry-max-time 86400 --retry-connrefused --max-time 1800 \
         --silent --show-error \
         --location \
@@ -29,6 +58,7 @@ getStateFile() {
     )
     case $http_code in
     200 | 204)
+      go_curl="false"
       break
       ;;
     408 | 421 | 429 | 5*)
@@ -52,12 +82,9 @@ getStateFile() {
 putStateFile() {
   local stateName="$1"
   local stateFileName="${2:-$1}"
-  local apiToken
-  apiToken=$(jq -r '.["hercules-ci"].data.token' "$HERCULES_CI_SECRETS_JSON")
-
   echo "pushing state file $stateName..."
   curl \
-    -H "Authorization: Bearer $apiToken" \
+    -H @$herculesCIHeaders \
     --retry-max-time 86400 --retry-connrefused --max-time 1800 \
     --silent --show-error \
     --location --fail \
@@ -68,10 +95,78 @@ putStateFile() {
   echo "pushing state successful."
 }
 
+# ----------------------------------------------------------------------------
+# uploading state on error too
+
+putStatePhaseOnFailure() {
+  if [[ -n $putStatePhase ]]; then
+    echo 'uploading state files after failure' 1>&2
+    eval "$putStatePhase"
+  fi
+}
+
+registerPutStatePhaseOnFailure() {
+  failureHooks=("putStatePhaseOnFailure" "${failureHooks[@]}")
+}
+
+# ----------------------------------------------------------------------------
+# unpack fix
+
+simpleCopyUnpack() {
+  local fn="$1"
+  cp --no-preserve=ownership --recursive --reflink=auto \
+    -- $fn "$(stripHash "$fn")" \
+    ;
+}
+
+unpackCmdHooks+=(simpleCopyUnpack)
+
+# ----------------------------------------------------------------------------
+# only show phase headers when debugging
+
+overrideShowPhaseHeader() {
+  if [[ -z "${NIX_DEBUG:-}" ]]; then
+    # override it
+    showPhaseHeader() {
+      :
+    }
+  fi
+}
+
+postHooks+=(overrideShowPhaseHeader)
+
+# ----------------------------------------------------------------------------
+# warn if run in wrong environment
+
+if [[ "true" != ${IN_HERCULES_CI_EFFECT:-} ]]; then
+
+  # makeNixSandboxBuildSucceed: Introduced to work around a Nix bug.
+  # Effects aren't intended to be buildable. Used by `effect-vm-test.nix``.
+  if [[ 1 = ${makeNixSandboxBuildSucceed:-} ]]; then
+    touch $out
+    exit 0
+  fi
+
+  if [[ -n ${NIX_LOG_FD:-} ]]; then
+    cat 1>&2 <<EOF
+WARNING: You are running a Hercules CI Effect in the Nix sandbox. This is very
+         unlikely to work. Effects are described in the derivation format and
+         have a lot in common, so you've probably tried to build it by accident.
+EOF
+  else
+    cat 1>&2 <<EOF
+WARNING: This effect is not running in the Hercules CI Effect sandbox.
+EOF
+  fi
+
+fi
+
+# ----------------------------------------------------------------------------
+# using secrets
+
 readSecretString() {
   local secretName="$1"
   local dataPath="$2"
-
   if ! jq -e -r '.[$secretName].data | '"$dataPath" --arg secretName "$secretName" <"$HERCULES_CI_SECRETS_JSON"; then
     echo 1>&2 "Could not find path $dataPath in secret $secretName"
     return 1
@@ -81,7 +176,6 @@ readSecretString() {
 readSecretJSON() {
   local secretName="$1"
   local dataPath="$2"
-
   jq -c '.[$secretName].data | '"$dataPath" --arg secretName "$secretName" <"$HERCULES_CI_SECRETS_JSON"
 }
 
@@ -91,9 +185,11 @@ writeAWSSecret() {
 
   mkdir -p ~/.aws
   cat >>~/.aws/credentials <<EOF
+
 [$profileName]
 aws_secret_access_key = $(readSecretString "$secretName" .aws_secret_access_key)
 aws_access_key_id = $(readSecretString "$secretName" .aws_access_key_id)
+
 EOF
 }
 
@@ -101,7 +197,6 @@ writeSSHKey() {
   local secretName="${1:-ssh}"
   local privateName="${2:-$HOME/.ssh/id_rsa}"
   local publicName="${privateName}.pub"
-
   mkdir -p "$(dirname "$privateName")"
   readSecretString "$secretName" .privateKey >"$privateName"
   chmod 0400 "$privateName"
@@ -118,7 +213,7 @@ writeDockerKey() {
   local secretName="${1:-docker}"
   local directory="${2:-$HOME/.docker}"
 
-  mkdir -p "$directory"
+  mkdir -p $directory
 
   readSecretString "$secretName" .clientKey >"$directory/key.pem"
   readSecretString "$secretName" .clientCertificate >"$directory/cert.pem"
@@ -127,7 +222,6 @@ writeDockerKey() {
   # Please permission checks if any
   chmod 0400 "$directory"/{key,cert,ca}.pem
 }
-
 useDockerHost() {
   local host="${1}"
   local port="${2:-2376}"
@@ -138,7 +232,6 @@ useDockerHost() {
 gpgFingerprints() {
   gpg --with-colons --import-options show-only --import --fingerprint | awk -F: '$1 == "fpr" {print $10;}'
 }
-
 gpgTrust() {
   gpgFingerprints | sed -e 's/$/:6/' | gpg --import-ownertrust
 }
@@ -147,23 +240,4 @@ writeGPGKey() {
   local secretName="${1:-gpg}"
   readSecretString "$secretName" .privateKey | gpg --import
   readSecretString "$secretName" .privateKey | gpgTrust
-}
-
-writeAgeKey() {
-  local secretName="${1:-age}"
-  local fileName="${2:-$HOME/.config/sops/age/keys.txt}"
-
-  mkdir -p "$(dirname "$fileName")"
-  readSecretString "$secretName" .privateKey >"$fileName"
-}
-
-setupGit() {
-  local secretName="${1:-"git-author"}"
-
-  commitAuthor=$(readSecretString "$secretName" .username)
-  commitEmail=$(readSecretString "$secretName" .email)
-
-  git config --global user.name "$commitAuthor"
-  git config --global user.email "$commitEmail"
-  git config --global safe.directory '*'
 }
