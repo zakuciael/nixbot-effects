@@ -54,7 +54,7 @@ in
   # onEvent only: conditions nixbot checks against the event before
   # running, see https://github.com/Mic92/nixbot/blob/main/docs/EFFECTS.md. `lock` may contain `{pr}` there.
   when ? { },
-  # ...
+  ...
 }@args:
 stdenvNoCC.mkDerivation (
   {
